@@ -1,0 +1,14 @@
+# Virtual Environments
+.venv/
+venv/
+ENV/
+env/
+
+# PyCharm / IDE
+.idea/
+*.iml
+
+# Python internals
+__pycache__/
+*.pyc
+requirements.txt.tmp

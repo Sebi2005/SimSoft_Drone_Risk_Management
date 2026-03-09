@@ -1,12 +1,11 @@
 import time
 import pandas as pd
+import requests
 import streamlit as st
-import os
-import folium
 from streamlit_folium import st_folium
-from branca.element import MacroElement
-from jinja2 import Template
+
 from config import AIRPORT_COORDS
+
 st.set_page_config(
     page_title="Rogue Drone Radar",
     page_icon="🛡️",

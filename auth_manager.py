@@ -28,3 +28,4 @@ def get_access_token(email):
 if __name__ == "__main__":
     email = input("Enter email: ")
     verify = get_access_token(email)
+    print(verify)

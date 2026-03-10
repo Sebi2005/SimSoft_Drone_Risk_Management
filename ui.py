@@ -3,6 +3,7 @@ import pandas as pd
 import requests
 import streamlit as st
 from streamlit_folium import st_folium
+import folium
 
 from config import AIRPORT_COORDS
 

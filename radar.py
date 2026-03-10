@@ -54,16 +54,12 @@ def process_drones_for_ui():
     processed = []
 
     for d in drones:
-        status, dist, trend, reason, alt = assess_risk(d)
+        status, dist, trend, hdg, alt, reason, name = assess_risk(d)
 
         # same local filtering as radar console
         if dist < 50000:
             sn = d.get('serial') or d.get('trackId') or d.get('id')
             current_loop_serials.append(sn)
-
-            history = d.get('history', [])
-            hdg = get_heading(history) if history else 0.0
-
 
             location = d.get('droneData', {}).get('location', {}) or {}
             pilot = d.get('pilotData', {}).get('id') or "Unknown"

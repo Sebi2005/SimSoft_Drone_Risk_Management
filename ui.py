@@ -301,17 +301,17 @@ with tab_live:
         with st.container(border=True):
             a, b, c = st.columns(3)
             with a:
-                st.markdown(f"### {d['Drone ID']}");
-                st.write(f"**Pilot ID:** {d['Pilot ID']}");
+                st.markdown(f"### {d['Drone ID']}")
+                st.write(f"**Pilot ID:** {d['Pilot ID']}")
                 st.write(f"**Status:** {d['Status']}")
             with b:
-                st.write(f"**Risk Score:** {d['Risk Score']}");
-                st.write(f"**Distance:** {d['Distance (m)']} m");
+                st.write(f"**Risk Score:** {d['Risk Score']}")
+                st.write(f"**Distance:** {d['Distance (m)']} m")
                 st.write(f"**Altitude AGL:** {d['Altitude AGL']} m")
             with c:
-                st.write(f"**Heading:** {d['Heading (°)']}°");
-                st.write(f"**Lat:** {d['Latitude']}");
-                st.write(f"**Lng:** {d['Longitude']}");
+                st.write(f"**Heading:** {d['Heading (°)']}°")
+                st.write(f"**Lat:** {d['Latitude']}")
+                st.write(f"**Lng:** {d['Longitude']}")
                 st.write(f"**Reasons:** {d['Reasons']}")
             if show_raw:
                 with st.expander("Raw drone JSON"): st.json(d["raw"])

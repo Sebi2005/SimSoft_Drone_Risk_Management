@@ -274,7 +274,7 @@ with tab_live:
                 pdk.Layer("PolygonLayer", data=zone_df, get_polygon="polygon", get_fill_color=[229, 62, 62, 80],
                           get_line_color=[229, 62, 62, 200], line_width_min_pixels=2, pickable=True),
                 pdk.Layer("ScatterplotLayer", data=map_df, get_position='[Longitude, Latitude]', get_radius=200,
-                          radius_scale=2, radius_min_pixels=10, radius_max_pixels=10, get_fill_color=[255, 0, 0, 240],
+                          radius_scale=2, radius_min_pixels=10, radius_max_pixels=10, get_fill_color="color",
                           get_line_color=[255, 255, 255], line_width_min_pixels=2, pickable=True),
                 pdk.Layer("TextLayer", data=map_df, get_position='[Longitude, Latitude]', get_text="Drone ID",
                           get_size=14, get_color=[255, 255, 255], get_alignment_baseline="'bottom'"),
@@ -286,8 +286,14 @@ with tab_live:
             tooltip = {
                 "html": "<b>ID:</b> {Drone ID}<br/><b>Pilot:</b> {Pilot ID}<br/><b>Status:</b> {Status}<br/><b>Altitude:</b> {Altitude AGL} m",
                 "style": {"backgroundColor": "rgba(20,20,20,0.85)", "color": "white"}}
-            st.pydeck_chart(pdk.Deck(map_style="light", initial_view_state=view_state, layers=layers, tooltip=tooltip),
-                            use_container_width=True)
+            deck = pdk.Deck(
+                map_style="light",
+                initial_view_state=view_state,
+                layers=layers,
+                tooltip=tooltip
+            )
+
+            st.pydeck_chart(deck, use_container_width=True)
 
     st.subheader("📋 Live Drone Feed")
     if drones:

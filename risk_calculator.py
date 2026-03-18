@@ -1,18 +1,7 @@
 import math
-
 from airspace_manager import AirspaceManager
-from config import AIRPORT_COORDS, MAX_SAFE_ALTITUDE
 
 airspace = AirspaceManager()
-
-def get_distance(lat1, lon1):
-    lat2, lon2 = AIRPORT_COORDS
-    R = 6371000  # Meters
-    phi1, phi2 = math.radians(lat1), math.radians(lat2)
-    dphi = math.radians(lat2 - lat1)
-    dlambda = math.radians(lon2 - lon1)
-    a = math.sin(dphi / 2) ** 2 + math.cos(phi1) * math.cos(phi2) * math.sin(dlambda / 2) ** 2
-    return 2 * R * math.atan2(math.sqrt(a), math.sqrt(1 - a))
 
 
 def get_heading(history):
@@ -36,8 +25,8 @@ def get_proximity_trend(history, current_alt):
     current_pos = history[-1]
     past_pos = history[-10]
 
-    current_dist = get_distance(current_pos['lat'], current_pos['lng'])
-    past_dist = get_distance(past_pos['lat'], past_pos['lng'])
+    current_dist = airspace.get_distance_to_closest_zone_3d(current_pos['lat'], current_pos['lng'], current_alt)[0]
+    past_dist = airspace.get_distance_to_closest_zone_3d(past_pos['lat'], past_pos['lng'], current_alt)[0]
 
     diff = current_dist - past_dist
 
@@ -51,9 +40,7 @@ def assess_risk(drone):
     lat, lng = pos.get('lat'), pos.get('lng')
     alt = drone.get('droneData', {}).get('altitudes', {}).get('agl', 0) or 0
 
-    dist_to_zone, zone_name = airspace.get_distance_to_closest_zone(lat, lng)
-
-    reason = "None"
+    dist_to_zone, zone_name = airspace.get_distance_to_closest_zone_3d(lat, lng, alt)
 
     if dist_to_zone == 0:
         status, reason = "🔴 CRITICAL", f"BREACH: {zone_name}"

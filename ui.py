@@ -123,11 +123,11 @@ with tab_live:
             elif "PREDICTIVE" in status:
                 st.markdown(
                     f"""<div style='padding: 12px; border-radius: 12px; 
-                                    background: rgba(128, 0, 128, 0.15); border-left: 6px solid #800080; 
-                                    margin-bottom: 10px; color: white;'>
-                                    <b>{d['Drone ID']} (AI INTERCEPT)</b><br>{d['Reasons']}</div>""",
+                                                background: rgba(128, 0, 128, 0.15); border-left: 6px solid #800080; 
+                                                margin-bottom: 10px; color: white;'>
+                                                <b>{d['Drone ID']} (AI INTERCEPT)</b><br>{d['Reasons']}</div>""",
                     unsafe_allow_html=True)
-                shown_any = True
+
             elif "WARNING" in status:
                 st.markdown(f"<div class='warning-box'><b>{d['Drone ID']}</b><br>{d['Reasons']}</div>",
                             unsafe_allow_html=True)
@@ -139,15 +139,8 @@ with tab_live:
     with right:
         st.subheader("🗺️ Tactical 3D Map")
 
-        # Force zone_df to exist even if drones are missing
+        map_df = pd.DataFrame(drones)
         zone_df = build_zone_df(airspace)
-
-        if drones:
-            map_df = pd.DataFrame(drones)
-        else:
-            map_df = pd.DataFrame(columns=["Longitude", "Latitude", "Status", "ai_path"])
-        if "raw" in map_df.columns:
-            map_df = map_df.drop(columns=["raw"])
 
         view_state = pdk.ViewState(
             latitude=ROMANIA_CENTER_LAT,
@@ -157,30 +150,49 @@ with tab_live:
             bearing=0
         )
 
-        if not map_df.empty and "Pilot_Lat" in map_df.columns:
-            pilot_df = map_df.dropna(subset=["Pilot_Lat", "Pilot_Lng"])
-        else:
-            pilot_df = pd.DataFrame(columns=["Pilot_Lat", "Pilot_Lng"])
-
         # Drone history trails
         path_data = []
-        if not map_df.empty and "history_path" in map_df.columns:
-            for _, row in map_df.iterrows():
-                if len(row["history_path"]) >= 2:
+        predicted_path_data = []
+
+        for d in drones:
+            history = d.get("raw", {}).get("history", [])
+            if history:
+                coords = [[p['lng'], p['lat']] for p in history if
+                          p.get("lat") is not None and p.get("lng") is not None]
+                if d.get("Longitude") is not None and d.get("Latitude") is not None:
+                    coords.append([d['Longitude'], d['Latitude']])
+                if len(coords) >= 2:
                     path_data.append({
-                        "path": row["history_path"],
-                        "color": row["color"]
+                        "path": coords,
+                        "color": get_status_color(d["Status"])
                     })
+
+            pred_path = d.get("predicted_path", [])
+            if pred_path and len(pred_path) >= 2:
+                full_pred_path = [[d["Longitude"], d["Latitude"]]] + pred_path
+                predicted_path_data.append({
+                    "path": full_pred_path,
+                    "color": [255, 0, 255, 220],
+                    "Drone ID": d["Drone ID"]
+                })
 
         # Pilot -> Drone dotted connection lines
         pilot_link_data = []
-        if not map_df.empty and "pilot_link" in map_df.columns:
-            for _, row in map_df.iterrows():
-                if row["pilot_link"]:  # Only add if the link list is not empty
-                    pilot_link_data.append({
-                        "path": row["pilot_link"],
-                        "color": [120, 200, 255, 180]
-                    })
+        for d in drones:
+            if (
+                d.get("Pilot_Lat") is not None and
+                d.get("Pilot_Lng") is not None and
+                d.get("Latitude") is not None and
+                d.get("Longitude") is not None
+            ):
+                pilot_link_data.append({
+                    "path": [
+                        [d["Pilot_Lng"], d["Pilot_Lat"]],
+                        [d["Longitude"], d["Latitude"]],
+                    ],
+                    "color": [120, 200, 255, 180],
+                    "Drone ID": d["Drone ID"]
+                })
 
         # Pilot markers
         if {"Pilot_Lat", "Pilot_Lng"}.issubset(map_df.columns):
@@ -227,32 +239,8 @@ with tab_live:
                 })
 
         layers = [
-            # 1. Restricted zones (Bottom)
-            pdk.Layer(
-                "PolygonLayer",
-                data=zone_df,
-                get_polygon="polygon",
-                get_fill_color=[229, 62, 62, 120],
-                get_line_color=[229, 62, 62, 200],
-                line_width_min_pixels=2,
-                pickable=True,
-                extruded=True,
-                get_elevation="max_alt",
-            ),
 
-            # 2. AI Predicted Path (Purple Line)
-            pdk.Layer(
-                "PathLayer",
-                data=map_df,
-                get_path="ai_path",  # Correct key from radar.py
-                get_color=[147, 0, 255, 200],
-                get_width=4,
-                width_min_pixels=2,
-                pickable=False,
-                rounded=True
-            ),
-
-            # 3. Drone history path (Dotted Trail)
+            # Drone history path
             pdk.Layer(
                 "PathLayer",
                 data=path_data,
@@ -260,76 +248,145 @@ with tab_live:
                 get_color="color",
                 width_min_pixels=2,
                 dash_array=[6, 4],
+                cap_rounded=True,
                 pickable=False
             ),
 
-            # 4. Pilot -> Drone link (Dashed Line)
+            # AI predicted future path
+            pdk.Layer(
+                "PathLayer",
+                data=predicted_path_data,
+                get_path="path",
+                get_color="color",
+                width_min_pixels=3,
+                cap_rounded=True,
+                pickable=True
+            ),
+
+            # Pilot -> drone dotted lines
             pdk.Layer(
                 "PathLayer",
                 data=pilot_link_data,
                 get_path="path",
                 get_color="color",
-                width_min_pixels=1,
-                dash_array=[3, 3],
+                width_min_pixels=2,
+                dash_array=[2, 4],
+                cap_rounded=True,
                 pickable=False
             ),
-
-            # 5. Pilot Markers
-            pdk.Layer(
-                "ScatterplotLayer",
-                data=pilot_df,
-                get_position='[Pilot_Lng, Pilot_Lat]',
-                get_fill_color=[80, 170, 255, 220],
-                get_radius=120,
-                radius_min_pixels=5,
-                pickable=True
-            ),
-
-            # 6. Heading Arrow (Calculated Polygon)
             pdk.Layer(
                 "PolygonLayer",
                 data=map_df,
                 get_polygon="heading_arrow",
                 get_fill_color="color",
+                get_line_color=[255, 255, 255, 180],
+                line_width_min_pixels=1,
                 stroked=True,
                 filled=True,
                 pickable=False
             ),
 
-            # 7. Drone Body (Top Layer)
+
+
+            # Soft glow around drones
+            pdk.Layer(
+                "ScatterplotLayer",
+                data=map_df,
+                get_position='[Longitude, Latitude]',
+                get_fill_color="color",
+                get_radius=500,
+                radius_min_pixels=10,
+                radius_max_pixels=20,
+                opacity=0.25,
+                pickable=False,
+            ),
+
+            # Drone body
             pdk.Layer(
                 "ColumnLayer",
                 data=map_df,
                 get_position='[Longitude, Latitude]',
-                get_elevation='[Altitude AGL]',  # Dictionary key match
+                get_elevation='elevation',
+                elevation_scale=1,
                 radius=DRONE_BODY_RADIUS_M,
+                radius_units="'meters'",
+                radius_min_pixels=4,
+                radius_max_pixels=10,
                 get_fill_color="color",
                 pickable=True,
-                extruded=True
+                extruded=True,
+                coverage=1
+            ),
+
+
+            # Pilot markers
+            pdk.Layer(
+                "ScatterplotLayer",
+                data=pilot_df,
+                get_position='[Pilot_Lng, Pilot_Lat]',
+                get_fill_color=[80, 170, 255, 220],
+                get_line_color=[255, 255, 255, 220],
+                line_width_min_pixels=1,
+                stroked=True,
+                filled=True,
+                get_radius=120,
+                radius_units="'meters'",
+                radius_min_pixels=5,
+                radius_max_pixels=10,
+                pickable=True
+            ),
+
+            # Optional pilot labels
+            pdk.Layer(
+                "TextLayer",
+                data=pilot_df,
+                get_position='[Pilot_Lng, Pilot_Lat]',
+                get_text='"PILOT"',
+                get_size=14,
+                get_color=[255, 255, 255, 220],
+                get_angle=0,
+                get_text_anchor='"start"',
+                get_alignment_baseline='"center"',
+                get_pixel_offset=[10, 0],
+                pickable=False
+            ),
+
+            # Restricted zones
+            pdk.Layer(
+                "PolygonLayer",
+                data=zone_df,
+                get_polygon="polygon",
+                get_fill_color=[229, 62, 62, 80],
+                get_line_color=[229, 62, 62, 200],
+                line_width_min_pixels=2,
+                pickable=True,
+                extruded=True,
+                get_elevation="elevation",
+                elevation_scale=1,
             )
         ]
 
         tooltip = {
             "html": """
-                <div style='font-family: sans-serif; line-height: 1.5;'>
-                    <div style='display: {Drone ID ? "block" : "none"};'>
-                        <b style='font-size: 14px; color: #00d1ff;'>Drone: {Drone ID}</b><br/>
-                        <hr style='margin: 5px 0; border: 0; border-top: 1px solid #444;'>
-                        <b>Status:</b> {Status}<br/>
-                        <b>Zone:</b> {Zone}<br/>
-                        <b>Alert:</b> <span style='color: #ffcc00;'>{Reasons}</span><br/>
-                        <b>Altitude:</b> {Altitude AGL} m<br/>
-                        <b>Pilot ID:</b> {Pilot ID}
-                    </div>
+                        <div style='font-family: sans-serif; line-height: 1.5;'>
+                            <div style='display: {Drone ID ? "block" : "none"};'>
+                                <b style='font-size: 14px; color: #00d1ff;'>Drone: {Drone ID}</b><br/>
+                                <hr style='margin: 5px 0; border: 0; border-top: 1px solid #444;'>
+                                <b>Status:</b> {Status}<br/>
+                                <b>Zone:</b> {Zone}<br/>
+                                <b>Alert:</b> <span style='color: #ffcc00;'>{Reasons}</span><br/>
+                                <b>Altitude:</b> {Altitude AGL} m<br/>
+                                <b>Pilot ID:</b> {Pilot ID}
+                            </div>
 
-                    <div style='display: {zone_id ? "block" : "none"};'>
-                        <b style='font-size: 14px; color: #ff4b4b;'>Restricted Zone: {zone_id}</b><br/>
-                        <hr style='margin: 5px 0; border: 0; border-top: 1px solid #444;'>
-                        <b>Min Alt:</b> {min_alt}<br/>
-                        <b>Max Alt:</b> {max_alt}
-                    </div>
-                </div>
-            """,
+                            <div style='display: {zone_id ? "block" : "none"};'>
+                                <b style='font-size: 14px; color: #ff4b4b;'>Restricted Zone: {zone_id}</b><br/>
+                                <hr style='margin: 5px 0; border: 0; border-top: 1px solid #444;'>
+                                <b>Min Alt:</b> {min_alt}<br/>
+                                <b>Max Alt:</b> {max_alt}
+                            </div>
+                        </div>
+                    """,
             "style": {
                 "backgroundColor": "rgba(20,20,20,0.95)",
                 "color": "white",
@@ -339,6 +396,7 @@ with tab_live:
                 "boxShadow": "0px 4px 15px rgba(0,0,0,0.5)",
                 "zIndex": "10000"
             }
+
         }
 
         st.pydeck_chart(
@@ -349,14 +407,14 @@ with tab_live:
                 tooltip=tooltip
             ),
             use_container_width=True,
-            key="radar_map_v2_primary"
+            key="radar_map_primary"
         )
 
     st.subheader("📋 Operations Log")
     if drones:
         df_display = pd.DataFrame(drones).drop(columns=['raw'])
         st.dataframe(df_display, use_container_width=True, hide_index=True)
-
+    #st.write("Predicted path lengths:", [len(d.get("predicted_path", [])) for d in drones])
 # -----------------------------
 # Archive Logic
 # -----------------------------

@@ -1,9 +1,13 @@
+import random
+
 import requests
 import time
 import os
 import csv
 import math
 from risk_calculator import assess_risk
+from ai_predictor import AIDronePredictor
+
 from config import (
     SENSOR_URL,
     TOKEN_IANNIS,
@@ -19,42 +23,48 @@ if 'active_missions' not in globals():
     active_missions = {}
 if 'drone_alert_states' not in globals():
     drone_alert_states = {}
-# --- 🧠 AI PERSISTENCE ADDED ---
-if 'drone_history_buffer' not in globals():
-    drone_history_buffer = {}
+if 'ai_predictor' not in globals():
+    try:
+        ai_predictor = AIDronePredictor('drone_model.h5')
+        print("✅ AI predictor loaded.")
+    except Exception as e:
+        ai_predictor = None
+        print(f"⚠️ AI predictor could not load: {e}")
 
-import random
+def build_prediction_history(drone_obj, current_alt):
+    """
+    Builds exactly the structure expected by normalize_sequence():
+    [{"lat": ..., "lng": ..., "alt": ...}, ...]
+    """
+    history = drone_obj.get("history", [])
+    coords = []
 
+    for p in history:
+        lat = p.get("lat")
+        lng = p.get("lng")
+        if lat is not None and lng is not None:
+            coords.append({
+                "lat": lat,
+                "lng": lng,
+                "alt": current_alt
+            })
 
-def generate_synthetic_data():
-    """Generates 10 artificial drones around Cluj-Napoca for UI testing."""
-    synthetic_drones = []
-    # Center of Cluj
-    base_lat, base_lng = 46.77, 23.60
+    curr_lat = drone_obj.get("droneData", {}).get("location", {}).get("lat")
+    curr_lng = drone_obj.get("droneData", {}).get("location", {}).get("lng")
 
-    for i in range(3):
-        sn = f"TEST-DRONE-{i:03d}"
-        # Spread them out
-        lat = base_lat + random.uniform(-0.03, 0.03)
-        lng = base_lng + random.uniform(-0.03, 0.03)
-
-        # Give some drones high speed to trigger the AI
-        speed = random.choice([5, 12, 25, 40])
-        heading = random.uniform(0, 360)
-
-        synthetic_drones.append({
-            "serial": sn,
-            "droneId": f"ALPHA-{i}",
-            "pilotId": f"PILOT-{random.randint(100, 999)}",
-            "droneData": {
-                "location": {"lat": lat, "lng": lng},
-                "altitudes": {"agl": random.randint(40, 200)},
-                "groundSpeed": speed,
-                "verticalSpeed": random.choice([-2, 0, 5]),
-                "heading": heading
-            }
+    if curr_lat is not None and curr_lng is not None:
+        coords.append({
+            "lat": curr_lat,
+            "lng": curr_lng,
+            "alt": current_alt
         })
-    return synthetic_drones
+
+    if len(coords) < 10:
+        return None
+
+    return coords[-10:]
+
+
 
 
 def log_incident(drone_id, status, dist, trend, reason):
@@ -76,31 +86,21 @@ def log_incident(drone_id, status, dist, trend, reason):
 
 
 def status_priority(status):
-    """
-    Assigns a numerical rank to statuses for sorting and UI prominence.
-    Higher number = Higher urgency.
-    """
     s = str(status).upper()
-
-    # 1. Active Emergency (Red)
-    if "CRITICAL" in s or "BREACH" in s:
-        return 4
-
-    # 2. AI Intercept (Purple) - High Stakes Proactive Alert
-    if "PREDICTIVE" in s:
+    if "CRITICAL" in s:
         return 3
-
-    # 3. Proximity Caution (Yellow)
     if "WARNING" in s:
         return 2
-
-    # 4. Routine Operations (Green)
     return 1
+
 
 
 def build_heading_arrow_polygon(lat, lng, heading_deg, tip_m=180, width_m=120, back_m=40):
     """
     Builds a small triangular arrow polygon connected to the drone point.
+    The drone sits near the back/base of the triangle.
+    0 = North, 90 = East.
+    Returns coordinates in [lng, lat] format for Pydeck PolygonLayer.
     """
     if lat is None or lng is None:
         return []
@@ -116,28 +116,98 @@ def build_heading_arrow_polygon(lat, lng, heading_deg, tip_m=180, width_m=120, b
         dlng = (dist_m * math.sin(rad)) / (111320.0 * math.cos(math.radians(lat0)))
         return [lng0 + dlng, lat0 + dlat]
 
+    # Tip in front
     tip = project(lat, lng, heading, tip_m)
+
+    # Two rear corners behind and to the sides
     left_base = project(lat, lng, heading + 140, width_m)
     right_base = project(lat, lng, heading - 140, width_m)
+
+    # Slight tail point behind center so it visually connects to the drone
     tail = project(lat, lng, heading + 180, back_m)
 
     return [tip, left_base, tail, right_base]
 
+def generate_synthetic_data():
+    """Generates artificial drones with the same schema as the live API."""
+    synthetic_drones = []
+    base_lat, base_lng = 46.7700, 23.6000  # Cluj-Napoca
+
+    for i in range(3):
+        sn = f"TEST-DRONE-{i:03d}"
+        lat = base_lat + random.uniform(-0.03, 0.03)
+        lng = base_lng + random.uniform(-0.03, 0.03)
+
+        pilot_lat = lat + random.uniform(-0.01, 0.01)
+        pilot_lng = lng + random.uniform(-0.01, 0.01)
+
+        speed = random.choice([5, 12, 25, 40])
+        heading = random.uniform(0, 360)
+        altitude = random.randint(40, 200)
+        history = []
+        for step in range(10, 0, -1):
+            history.append({
+                "lat": lat - step * 0.0008 * math.cos(math.radians(heading)),
+                "lng": lng - step * 0.0008 * math.sin(math.radians(heading))
+            })
+        synthetic_drones.append({
+            "id": 10000 + i,
+            "trackId": f"track-{i}",
+            "serial": sn,
+            "droneId": f"ALPHA-{i}",
+            "pilotId": f"PILOT-{random.randint(100, 999)}",
+            "manufacturer": "DJI",
+            "model": "Synthetic",
+            "history": history,
+            "droneData": {
+                "location": {"lat": lat, "lng": lng},
+                "altitudes": {
+                    "agl": altitude,
+                    "ato": altitude,
+                    "amsl": None,
+                    "geodetic": altitude + 120
+                },
+                "groundSpeed": speed,
+                "verticalSpeed": random.choice([-2, 0, 3]),
+                "orientation": heading,   # IMPORTANT: orientation, not heading
+                "likelihood": None,
+                "uncertainty": None,
+                "state": {
+                    "id": 2,
+                    "name": "Airborne"
+                }
+            },
+            "pilotData": {
+                "id": 20000 + i,
+                "location": {
+                    "lat": pilot_lat,
+                    "lng": pilot_lng
+                },
+                "likelihood": None,
+                "uncertainty": None
+            },
+            "timestamp": {
+                "date": time.strftime("%Y-%m-%d %H:%M:%S.000000"),
+                "timezone_type": 3,
+                "timezone": "Europe/Bucharest"
+            }
+        })
+
+    return synthetic_drones
+
 
 def process_drones_for_ui():
-    global drone_history_buffer
     headers = {"Authorization": f"Bearer {TOKEN_IANNIS}"}
     try:
         resp = requests.get(f"{SENSOR_URL}/api/fused-data/map/50000/0", headers=headers, timeout=5)
         raw_data = resp.json()
         if not raw_data or not isinstance(raw_data, list):
-            raw_data = generate_synthetic_data()
+            raw_data = []
     except Exception:
-        raw_data = generate_synthetic_data()
+        raw_data = []
+    raw_data.extend(generate_synthetic_data())
 
     unique_drones = {}
-    if not isinstance(raw_data, list):
-        return []
 
     for d in raw_data:
         sn = d.get('serial') or d.get('trackId') or d.get('id')
@@ -146,29 +216,31 @@ def process_drones_for_ui():
 
         drone_id = d.get('droneId') or sn
 
-        # --- 🧠 UPDATE AI HISTORY BUFFER ---
-        if sn not in drone_history_buffer:
-            drone_history_buffer[sn] = []
-
-        curr_lat = d.get('droneData', {}).get('location', {}).get('lat')
-        curr_lng = d.get('droneData', {}).get('location', {}).get('lng')
-
-        drone_history_buffer[sn].append({
-            'lat': curr_lat,
-            'lng': curr_lng,
-            'droneData': d.get('droneData', {})
-        })
-
-        if len(drone_history_buffer[sn]) > 10:
-            drone_history_buffer[sn].pop(0)
-
-        # --- 🛡️ RUN ENHANCED RISK ASSESSMENT ---
-        # Passing history to get the 9-tuple return including ai_path
-        status, dist, trend, hdg, alt, reason, zone, speed, ai_path = assess_risk(d, drone_history_buffer[sn])
+        status, dist, trend, hdg, alt, reason, zone, speed = assess_risk(d)
 
         log_incident(drone_id, status, dist, trend, reason)
 
-        # Heading arrow uses the heading calculated by the AI/History
+        curr_lat = d.get('droneData', {}).get('location', {}).get('lat')
+        curr_lng = d.get('droneData', {}).get('location', {}).get('lng')
+        predicted_path = []
+
+        if ai_predictor is not None:
+            try:
+                pred_history = build_prediction_history(d, alt)
+                print(f"{drone_id} history_length: {len(pred_history) if pred_history is not None else 0}")
+                if pred_history is not None:
+                    pred_coords = ai_predictor.predict_path(pred_history)
+                    print(f"{drone_id} pred_coords: {pred_coords}")
+
+                    if pred_coords is not None:
+                        # Convert model output to [lng, lat] for Pydeck
+                        predicted_path = [[float(p[1]), float(p[0])] for p in pred_coords]
+                        print(f"{drone_id} predicted_path points: {len(predicted_path)}")
+            except Exception as e:
+                print(f"Prediction failed for {drone_id}: {e}")
+                predicted_path = []
+        else:
+            print("ai_predictor is None")
         heading_arrow = build_heading_arrow_polygon(
             curr_lat,
             curr_lng,
@@ -177,25 +249,11 @@ def process_drones_for_ui():
             width_m=ARROW_WIDTH_M,
             back_m=ARROW_BACK_M
         )
-
         pilot_lat = d.get('pilotData', {}).get('location', {}).get('lat')
         pilot_lng = d.get('pilotData', {}).get('location', {}).get('lng')
 
-        ai_path_for_map = []
 
-        # Calculate Future Lat/Lng from AI if available, else fallback
-        if ai_path is not None:
-            ai_path_clean = ai_path.tolist() if hasattr(ai_path, 'tolist') else ai_path
-            f_lat, f_lng = ai_path_clean[-1][0], ai_path_clean[-1][1]
-            ai_path_for_map = [[p[1], p[0], p[2]] for p in ai_path_clean]
-        else:
-            # Simple projection fallback for new drones
-            rad_hdg = math.radians(hdg or 0)
-            f_lat = curr_lat + (speed * 20 * math.cos(rad_hdg)) / 111320.0
-            f_lng = curr_lng + (speed * 20 * math.sin(rad_hdg)) / (111320.0 * math.cos(math.radians(curr_lat)))
 
-        history_list = [[p['lng'], p['lat'], p.get('droneData', {}).get('altitudes', {}).get('agl', 0)]
-                        for p in drone_history_buffer[sn]]
 
         unique_drones[sn] = {
             "Drone ID": drone_id,
@@ -207,31 +265,23 @@ def process_drones_for_ui():
             "Altitude AGL": alt,
             "Latitude": curr_lat,
             "Longitude": curr_lng,
-            "Future_Lat": f_lat,
-            "Future_Lng": f_lng,
             "Pilot_Lat": pilot_lat,
             "Pilot_Lng": pilot_lng,
             "heading_arrow": heading_arrow,
+            "predicted_path": predicted_path,
             "Speed": speed,
             "Reasons": reason,
             "Zone": zone,
             "Label": f"{drone_id} ({alt}m)",
             "color": get_status_color(status),
             "elevation": alt,
-            "raw": d,
-            "ai_path": ai_path_for_map,
-            "history_path": history_list,
-            "pilot_link": [[pilot_lng, pilot_lat], [curr_lng, curr_lat]] if pilot_lat else []
+            "raw": d
         }
 
-    # Sort by priority before returning to UI
-    final_list = list(unique_drones.values())
-    final_list.sort(key=lambda x: status_priority(x['Status']), reverse=True)
-    return final_list
+    return list(unique_drones.values())
 
 
 def reset_radar_state():
-    global active_missions, drone_alert_states, drone_history_buffer
+    global active_missions, drone_alert_states
     active_missions.clear()
     drone_alert_states.clear()
-    drone_history_buffer.clear()

@@ -1,5 +1,6 @@
 import math
 from airspace_manager import AirspaceManager
+from predictor import project_future_position
 
 airspace = AirspaceManager()
 
@@ -52,7 +53,6 @@ def check_prediction(lat, lng, heading, speed, alt):
     """Checks if the projected path intersects a restricted zone."""
     if speed < 1.0: return "SAFE"
 
-    from predictor import project_future_position
     fut_lat, fut_lng = project_future_position(lat, lng, heading, speed, seconds_ahead=20)
 
     dist_at_t20, zone_name = airspace.get_distance_to_closest_zone_3d(fut_lat, fut_lng, alt)

@@ -127,7 +127,7 @@ with tab_live:
                                                 margin-bottom: 10px; color: white;'>
                                                 <b>{d['Drone ID']} (AI INTERCEPT)</b><br>{d['Reasons']}</div>""",
                     unsafe_allow_html=True)
-
+                shown_any = True
             elif "WARNING" in status:
                 st.markdown(f"<div class='warning-box'><b>{d['Drone ID']}</b><br>{d['Reasons']}</div>",
                             unsafe_allow_html=True)
@@ -140,6 +140,8 @@ with tab_live:
         st.subheader("🗺️ Tactical 3D Map")
 
         map_df = pd.DataFrame(drones)
+        if not map_df.empty and "raw" in map_df.columns:
+            map_df = map_df.drop(columns=['raw'])
         zone_df = build_zone_df(airspace)
 
         view_state = pdk.ViewState(
@@ -156,11 +158,20 @@ with tab_live:
 
         for d in drones:
             history = d.get("raw", {}).get("history", [])
+            current_alt = d.get("Altitude AGL", 0)
             if history:
-                coords = [[p['lng'], p['lat']] for p in history if
-                          p.get("lat") is not None and p.get("lng") is not None]
+                # 💡 FIX: Create [lng, lat, alt] triplets
+                coords = []
+                for p in history:
+                    if p.get("lat") is not None and p.get("lng") is not None:
+                        # Use the point's recorded alt, or fallback to current drone alt
+                        p_alt = p.get("alt") if p.get("alt") is not None else current_alt
+                        coords.append([p['lng'], p['lat'], p_alt])
+
+                # Add the current position as the final point in the trail
                 if d.get("Longitude") is not None and d.get("Latitude") is not None:
-                    coords.append([d['Longitude'], d['Latitude']])
+                    coords.append([d['Longitude'], d['Latitude'], current_alt])
+
                 if len(coords) >= 2:
                     path_data.append({
                         "path": coords,
@@ -274,15 +285,16 @@ with tab_live:
                 cap_rounded=True,
                 pickable=False
             ),
+
             pdk.Layer(
-                "PolygonLayer",
+                "PathLayer",
                 data=map_df,
-                get_polygon="heading_arrow",
-                get_fill_color="color",
-                get_line_color=[255, 255, 255, 180],
-                line_width_min_pixels=1,
-                stroked=True,
-                filled=True,
+                get_path="heading_arrow",  # Now a list of [lng, lat, alt]
+                get_color="color",
+                width_min_pixels=20,
+                width_scale=2,
+                cap_rounded=True,
+                joint_rounded=True,
                 pickable=False
             ),
 
@@ -299,23 +311,6 @@ with tab_live:
                 radius_max_pixels=20,
                 opacity=0.25,
                 pickable=False,
-            ),
-
-            # Drone body
-            pdk.Layer(
-                "ColumnLayer",
-                data=map_df,
-                get_position='[Longitude, Latitude]',
-                get_elevation='elevation',
-                elevation_scale=1,
-                radius=DRONE_BODY_RADIUS_M,
-                radius_units="'meters'",
-                radius_min_pixels=4,
-                radius_max_pixels=10,
-                get_fill_color="color",
-                pickable=True,
-                extruded=True,
-                coverage=1
             ),
 
 

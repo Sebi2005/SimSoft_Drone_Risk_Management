@@ -1,5 +1,4 @@
 import random
-
 import requests
 import time
 import os
@@ -31,39 +30,59 @@ if 'ai_predictor' not in globals():
         ai_predictor = None
         print(f"⚠️ AI predictor could not load: {e}")
 
+
 def build_prediction_history(drone_obj, current_alt):
     """
-    Builds exactly the structure expected by normalize_sequence():
-    [{"lat": ..., "lng": ..., "alt": ...}, ...]
+    Builds the 6-feature structure expected by the AI model.
+    Features: [lat, lng, alt, groundSpeed, verticalSpeed, heading]
     """
-    history = drone_obj.get("history", [])
-    coords = []
+    history_raw = drone_obj.get("history", [])
+    drone_data = drone_obj.get("droneData", {})
 
-    for p in history:
+    # Static features for this frame (as fallback for history points)
+    gs = drone_data.get("groundSpeed", 0)
+    vs = drone_data.get("verticalSpeed", 0)
+    # The API uses 'orientation', but we'll check both
+    hdg = drone_data.get("orientation") if drone_data.get("orientation") is not None else drone_data.get("heading", 0)
+
+    coords = []
+    # 1. Process History Points
+    for p in history_raw:
         lat = p.get("lat")
         lng = p.get("lng")
         if lat is not None and lng is not None:
             coords.append({
                 "lat": lat,
                 "lng": lng,
-                "alt": current_alt
+                "droneData": {
+                    "altitudes": {"agl": current_alt},
+                    "groundSpeed": gs,
+                    "verticalSpeed": vs,
+                    "heading": hdg
+                }
             })
 
-    curr_lat = drone_obj.get("droneData", {}).get("location", {}).get("lat")
-    curr_lng = drone_obj.get("droneData", {}).get("location", {}).get("lng")
+    # 2. Add Current Point
+    curr_loc = drone_data.get("location", {})
+    curr_lat = curr_loc.get("lat")
+    curr_lng = curr_loc.get("lng")
 
     if curr_lat is not None and curr_lng is not None:
         coords.append({
             "lat": curr_lat,
             "lng": curr_lng,
-            "alt": current_alt
+            "droneData": {
+                "altitudes": {"agl": current_alt},
+                "groundSpeed": gs,
+                "verticalSpeed": vs,
+                "heading": hdg
+            }
         })
 
     if len(coords) < 10:
         return None
 
     return coords[-10:]
-
 
 
 
@@ -95,7 +114,7 @@ def status_priority(status):
 
 
 
-def build_heading_arrow_polygon(lat, lng, heading_deg, tip_m=180, width_m=120, back_m=40):
+def build_heading_arrow_polygon(lat, lng, heading_deg, alt, tip_m=180, width_m=120, back_m=40):
     """
     Builds a small triangular arrow polygon connected to the drone point.
     The drone sits near the back/base of the triangle.
@@ -117,16 +136,16 @@ def build_heading_arrow_polygon(lat, lng, heading_deg, tip_m=180, width_m=120, b
         return [lng0 + dlng, lat0 + dlat]
 
     # Tip in front
-    tip = project(lat, lng, heading, tip_m)
+    tip = project(lat, lng, heading, tip_m) + [alt]
 
     # Two rear corners behind and to the sides
-    left_base = project(lat, lng, heading + 140, width_m)
-    right_base = project(lat, lng, heading - 140, width_m)
+    left_base = project(lat, lng, heading + 140, width_m) + [alt]
+    right_base = project(lat, lng, heading - 140, width_m) + [alt]
 
     # Slight tail point behind center so it visually connects to the drone
-    tail = project(lat, lng, heading + 180, back_m)
+    tail = project(lat, lng, heading + 180, back_m) + [alt]
 
-    return [tip, left_base, tail, right_base]
+    return [tip, left_base, tail, right_base, tip]
 
 def generate_synthetic_data():
     """Generates artificial drones with the same schema as the live API."""
@@ -233,9 +252,20 @@ def process_drones_for_ui():
                     print(f"{drone_id} pred_coords: {pred_coords}")
 
                     if pred_coords is not None:
-                        # Convert model output to [lng, lat] for Pydeck
-                        predicted_path = [[float(p[1]), float(p[0])] for p in pred_coords]
-                        print(f"{drone_id} predicted_path points: {len(predicted_path)}")
+                        predicted_path = [[float(curr_lng), float(curr_lat), float(alt)]]
+                        for p in pred_coords:
+                            # p[0] is Lat offset (meters), p[1] is Lng offset (meters)
+                            lat_offset = float(p[0]) / 111139
+                            lng_offset = float(p[1]) / (111139 * math.cos(math.radians(curr_lat)))
+
+                            # New Absolute GPS point
+                            new_lat = curr_lat + lat_offset
+                            new_lng = curr_lng + lng_offset
+                            new_alt = float(p[2])  # Altitude is already in meters
+
+                            predicted_path.append([new_lng, new_lat, new_alt])
+
+                        print(f"{drone_id} predicted_path expanded for GPS scale.")
             except Exception as e:
                 print(f"Prediction failed for {drone_id}: {e}")
                 predicted_path = []
@@ -245,6 +275,7 @@ def process_drones_for_ui():
             curr_lat,
             curr_lng,
             hdg,
+            alt,
             tip_m=ARROW_TIP_M,
             width_m=ARROW_WIDTH_M,
             back_m=ARROW_BACK_M

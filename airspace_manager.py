@@ -69,7 +69,7 @@ def build_zone_df(airspace_manager):
             "zone_id": props.get("zone_id", "Unknown"),
             "min_alt": f"{lower_m:.1f}m",
             "max_alt": f"{upper_m:.1f}m",
-            "elevation": float(upper_m),
+            "elevation": upper_m,
             "status": props.get("status", "")
         })
     return pd.DataFrame(zones)

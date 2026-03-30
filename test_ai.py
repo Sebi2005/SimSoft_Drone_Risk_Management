@@ -13,7 +13,8 @@ for i in range(10):
     fake_history.append({
         'lat': 46.77 + (i * 0.0001),
         'lng': 23.60 + (i * 0.0001),
-        'droneData': {'altitudes': {'agl': 100}, 'groundSpeed': 10, 'verticalSpeed': 0}
+        'droneData': {'altitudes': {'agl': 100}, 'groundSpeed': 10, 'verticalSpeed': 0},
+        'heading': 45.0
     })
 
 prediction = predictor.predict_path(fake_history)

@@ -14,9 +14,9 @@ class AIDronePredictor:
         # Add batch dimension and predict
         prediction = self.model.predict(seq[np.newaxis, ...], verbose=0)[0]
 
-        # Denormalize back to Lat/Lng
-        prediction[:, 0] /= 111139
-        prediction[:, 1] /= 77000
-        real_coords = prediction + origin
+        real_coords = np.zeros_like(prediction)
+        real_coords[:, 0] = (prediction[:, 0] / 111139) + origin[0]
+        real_coords[:, 1] = (prediction[:, 1] / 77000) + origin[1]
+        real_coords[:, 2] = prediction[:, 2] + origin[2]
 
         return real_coords

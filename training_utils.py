@@ -1,21 +1,47 @@
+import math
 import numpy as np
 
+def get_heading(history):
+    """Calculates bearing between the last two points in history."""
+    if len(history) < 2: return 0
+    p1, p2 = history[-2], history[-1]
+    lat1, lon1 = math.radians(p1['lat']), math.radians(p1['lng'])
+    lat2, lon2 = math.radians(p2['lat']), math.radians(p2['lng'])
+
+    y = math.sin(lon2 - lon1) * math.cos(lat2)
+    x = math.cos(lat1) * math.sin(lat2) - math.sin(lat1) * math.cos(lat2) * math.cos(lon2 - lon1)
+    return (math.degrees(math.atan2(y, x)) + 360) % 360
+
+
 def normalize_sequence(history):
-    """
-    Converts a list of history points into a normalized
-    numpy array for the AI model.
-    """
     if len(history) < 10: return None
 
-    # Take the last 10 points
-    coords = np.array([[p['lat'], p['lng'], p.get('alt', 0)] for p in history[-10:]])
+    raw = []
+    for i in range(len(history) - 10, len(history)):
+        curr = history[i]
+        prev = history[i - 1] if i > 0 else curr
 
-    # Zero-center the data (Relative coordinates)
-    origin = coords[-1]
-    relative_coords = coords - origin
+        heading = get_heading([prev, curr])
+        d_data = curr.get('droneData', {})
 
-    # Scaling (Meters-ish approximation for better gradients)
-    relative_coords[:, 0] *= 111139
-    relative_coords[:, 1] *= 77000
+        raw.append([
+            curr['lat'],
+            curr['lng'],
+            d_data.get('altitudes', {}).get('agl', 0),
+            heading,
+            d_data.get('groundSpeed', 0),
+            d_data.get('verticalSpeed', 0)
+        ])
 
-    return relative_coords, origin
+    coords = np.array(raw)
+    origin = coords[-1, :3].copy()
+
+    coords[:, :3] -= origin
+    coords[:, 0] *= 111139
+    coords[:, 1] *= 77000
+
+    coords[:, 3] /= 360.0
+    coords[:, 4] /= 30.0
+    coords[:, 5] /= 10.0
+
+    return coords, origin

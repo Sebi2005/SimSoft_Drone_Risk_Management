@@ -13,7 +13,7 @@ for i in range(10):
     fake_history.append({
         'lat': 46.77 + (i * 0.0001),
         'lng': 23.60 + (i * 0.0001),
-        'alt': 100
+        'droneData': {'altitudes': {'agl': 100}, 'groundSpeed': 10, 'verticalSpeed': 0}
     })
 
 prediction = predictor.predict_path(fake_history)
@@ -21,8 +21,7 @@ prediction = predictor.predict_path(fake_history)
 print("\n--- 🧠 AI TRAJECTORY VERIFICATION ---")
 if prediction is not None:
     print(f"Current Position: {fake_history[-1]['lat']}, {fake_history[-1]['lng']}")
-    print(f"Predicted end point (in 10 steps): {prediction[-1][0]:.5f}, {prediction[-1][1]:.5f}")
-
+    print(f"Predicted end point (in 10 steps): {prediction[-1][0]:.5f}, {prediction[-1][1]:.5f}, Alt: {prediction[-1][2]:.1f}m")
     # Check if the predicted points are actually moving in the right direction
     if prediction[-1][0] > fake_history[-1]['lat']:
         print("✅ Directional Logic: Valid (Drone is projected forward)")
